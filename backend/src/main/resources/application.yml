@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8081}
 
 spring:
   config:
@@ -10,6 +10,18 @@ spring:
     url: ${DB_URL:${JDBC_DATABASE_URL:jdbc:postgresql://localhost:5432/quiz_leaderboard}}
     username: ${DB_USERNAME:${DATABASE_USERNAME:postgres}}
     password: ${DB_PASSWORD:${DATABASE_PASSWORD:postgres}}
+    hikari:
+      pool-name: quiz-hikari
+      maximum-pool-size: ${DB_MAX_POOL_SIZE:5}
+      minimum-idle: ${DB_MIN_IDLE:1}
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:30000}
+      validation-timeout: ${DB_VALIDATION_TIMEOUT_MS:5000}
+      idle-timeout: ${DB_IDLE_TIMEOUT_MS:60000}
+      max-lifetime: ${DB_MAX_LIFETIME_MS:240000}
+      keepalive-time: ${DB_KEEPALIVE_MS:30000}
+      connection-test-query: SELECT 1
+      data-source-properties:
+        tcpKeepAlive: true
   jpa:
     open-in-view: false
     hibernate:

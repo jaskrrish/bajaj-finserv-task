@@ -1,25 +1,28 @@
 package com.bajaj.quiz.service;
 
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
+import java.util.concurrent.Executor;
 
 @Component
 public class QuizRunAsyncProcessor {
 
     private final QuizRunService quizRunService;
+    private final Executor quizRunExecutor;
 
-    public QuizRunAsyncProcessor(QuizRunService quizRunService) {
+    public QuizRunAsyncProcessor(QuizRunService quizRunService, Executor quizRunExecutor) {
         this.quizRunService = quizRunService;
+        this.quizRunExecutor = quizRunExecutor;
     }
 
-    @Async
     public void orchestrate(UUID runId) {
-        try {
-            quizRunService.executePolling(runId);
-        } catch (Exception exception) {
-            quizRunService.markFailed(runId, exception);
-        }
+        quizRunExecutor.execute(() -> {
+            try {
+                quizRunService.executePolling(runId);
+            } catch (Exception exception) {
+                quizRunService.markFailed(runId, exception);
+            }
+        });
     }
 }

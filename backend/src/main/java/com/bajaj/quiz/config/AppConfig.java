@@ -6,15 +6,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.time.Clock;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 @Configuration
-@EnableAsync
 @EnableConfigurationProperties(AppProperties.class)
 public class AppConfig {
 
@@ -43,6 +43,11 @@ public class AppConfig {
     @Bean
     DelayStrategy delayStrategy() {
         return new ThreadSleepDelayStrategy();
+    }
+
+    @Bean(name = "quizRunExecutor")
+    Executor quizRunExecutor() {
+        return Executors.newVirtualThreadPerTaskExecutor();
     }
 
     @Bean

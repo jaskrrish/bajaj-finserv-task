@@ -60,6 +60,7 @@ mvn spring-boot:run
 ```
 
 Default backend URL: [http://localhost:8080](http://localhost:8080)
+Default backend URL: [http://localhost:8081](http://localhost:8081)
 
 Useful endpoints:
 
