@@ -1,0 +1,36 @@
+server:
+  port: 8080
+
+spring:
+  config:
+    import: optional:file:.env[.properties],optional:file:../.env[.properties]
+  application:
+    name: quiz-leaderboard-backend
+  datasource:
+    url: ${DB_URL:${JDBC_DATABASE_URL:jdbc:postgresql://localhost:5432/quiz_leaderboard}}
+    username: ${DB_USERNAME:${DATABASE_USERNAME:postgres}}
+    password: ${DB_PASSWORD:${DATABASE_PASSWORD:postgres}}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  threads:
+    virtual:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  validator:
+    base-url: ${VALIDATOR_BASE_URL:https://devapigw.vidalhealthtpa.com/srm-quiz-task}
+    poll-delay-ms: ${VALIDATOR_POLL_DELAY_MS:5000}

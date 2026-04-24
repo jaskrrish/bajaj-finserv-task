@@ -1,0 +1,36 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --color-graphite-950: #03070b;
+  --color-graphite-900: #08131d;
+  --color-signal-emerald: #7bf1bf;
+  --color-signal-amber: #ffd166;
+  --radius-panel: 28px;
+}
+
+:root {
+  color-scheme: dark;
+  font-family: "Space Grotesk", sans-serif;
+  background: #03070b;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: #03070b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(123, 241, 191, 0.3);
+}
