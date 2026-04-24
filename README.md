@@ -2,6 +2,10 @@
 
 Spring Boot backend and React/Tailwind ops console for the Bajaj Finserv Health quiz leaderboard assignment.
 
+## Screenshot
+
+![Quiz Leaderboard Ops Console](./brave_screenshot_localhost.png)
+
 ## Stack
 
 - Backend: Java 21+, Spring Boot 4.0.6, Spring Data JPA, Actuator, Flyway, PostgreSQL

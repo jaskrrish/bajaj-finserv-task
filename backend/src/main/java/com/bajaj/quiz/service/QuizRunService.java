@@ -20,13 +20,16 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -45,6 +48,7 @@ public class QuizRunService {
     private final DelayStrategy delayStrategy;
     private final AppProperties appProperties;
     private final Clock clock;
+    private final TransactionTemplate transactionTemplate;
 
     public QuizRunService(
             QuizRunRepository quizRunRepository,
@@ -59,7 +63,8 @@ public class QuizRunService {
             ObjectMapper objectMapper,
             DelayStrategy delayStrategy,
             AppProperties appProperties,
-            Clock clock
+            Clock clock,
+            PlatformTransactionManager transactionManager
     ) {
         this.quizRunRepository = quizRunRepository;
         this.pollMessageRepository = pollMessageRepository;
@@ -74,6 +79,7 @@ public class QuizRunService {
         this.delayStrategy = delayStrategy;
         this.appProperties = appProperties;
         this.clock = clock;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     @Transactional
@@ -136,19 +142,26 @@ public class QuizRunService {
                 .orElse(null);
     }
 
-    @Transactional
     public void executePolling(UUID runId) {
-        QuizRun run = quizRunRepository.findById(runId).orElseThrow(() -> notFound(runId));
+        String regNo = transactionTemplate.execute(status -> quizRunRepository.findById(runId)
+                .orElseThrow(() -> notFound(runId))
+                .getRegNo());
 
         for (int pollIndex = 0; pollIndex < 10; pollIndex++) {
-            ValidatorModels.QuizMessagesResponse response = validatorGateway.fetchQuizMessages(run.getRegNo(), pollIndex);
-            persistPollResponse(runId, response);
+            ValidatorModels.QuizMessagesResponse response = validatorGateway.fetchQuizMessages(regNo, pollIndex);
+            transactionTemplate.executeWithoutResult(status -> persistPollResponse(runId, response));
             if (pollIndex < 9) {
                 delayStrategy.sleep(Duration.ofMillis(appProperties.validator().pollDelayMs()));
             }
         }
 
-        finalizeRun(runId);
+        Map<String, Integer> totals = transactionTemplate.execute(status -> finalizeRun(runId));
+        transactionTemplate.executeWithoutResult(status -> submitOnce(runId, totals));
+        ApiDtos.RunSummaryResponse summary = transactionTemplate.execute(status -> {
+            QuizRun run = quizRunRepository.findById(runId).orElseThrow(() -> notFound(runId));
+            return buildSummary(run);
+        });
+        leaderboardExportPort.export(summary);
     }
 
     @Transactional
@@ -189,7 +202,7 @@ public class QuizRunService {
     }
 
     @Transactional
-    public void finalizeRun(UUID runId) {
+    public Map<String, Integer> finalizeRun(UUID runId) {
         QuizRun run = quizRunRepository.findById(runId).orElseThrow(() -> notFound(runId));
         List<DedupedEvent> dedupedEvents = dedupedEventRepository.findByRunIdOrderByParticipantAscRoundIdAsc(runId);
         Map<String, Integer> totals = leaderboardCalculator.aggregateScores(dedupedEvents);
@@ -205,14 +218,13 @@ public class QuizRunService {
         run.setStatus(RunStatus.COMPLETED);
         run.setCompletedAt(Instant.now(clock));
         quizRunRepository.save(run);
-
-        submitOnce(run, totals);
-        leaderboardExportPort.export(buildSummary(run));
+        return totals;
     }
 
     @Transactional
-    public void submitOnce(QuizRun run, Map<String, Integer> totals) {
-        if (submissionRecordRepository.existsByRunId(run.getId())) {
+    public void submitOnce(UUID runId, Map<String, Integer> totals) {
+        QuizRun run = quizRunRepository.findById(runId).orElseThrow(() -> notFound(runId));
+        if (submissionRecordRepository.existsByRunId(runId)) {
             return;
         }
 
@@ -221,16 +233,26 @@ public class QuizRunService {
                 leaderboardCalculator.toSubmissionLeaderboard(totals)
         );
         ValidatorModels.QuizSubmitResponse response = validatorGateway.submitLeaderboard(request);
+        int submittedTotal = response.submittedTotal() == null
+                ? totals.values().stream().mapToInt(Integer::intValue).sum()
+                : response.submittedTotal();
+        Integer expectedTotal = response.expectedTotal();
+        boolean correct = response.isCorrect() != null
+                ? response.isCorrect()
+                : expectedTotal != null && Objects.equals(submittedTotal, expectedTotal);
+        boolean idempotent = response.isIdempotent() != null
+                ? response.isIdempotent()
+                : response.attemptCount() != null && response.attemptCount() > 1;
 
         submissionRecordRepository.save(new SubmissionRecord(
                 run,
                 writeJson(request),
                 writeJson(response),
-                response.submittedTotal(),
-                response.expectedTotal(),
-                response.isCorrect(),
-                response.isIdempotent(),
-                response.message()
+                submittedTotal,
+                expectedTotal,
+                correct,
+                idempotent,
+                buildSubmissionMessage(response)
         ));
     }
 
@@ -272,5 +294,15 @@ public class QuizRunService {
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Unable to serialize payload", exception);
         }
+    }
+
+    private String buildSubmissionMessage(ValidatorModels.QuizSubmitResponse response) {
+        if (response.message() != null && !response.message().isBlank()) {
+            return response.message();
+        }
+        if (response.attemptCount() != null) {
+            return "Submission accepted by validator on attempt " + response.attemptCount() + ".";
+        }
+        return "Submission accepted by validator.";
     }
 }

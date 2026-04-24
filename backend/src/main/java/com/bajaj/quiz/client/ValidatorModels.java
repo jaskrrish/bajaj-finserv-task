@@ -35,9 +35,12 @@ public final class ValidatorModels {
     }
 
     public record QuizSubmitResponse(
-            boolean isCorrect,
-            boolean isIdempotent,
-            int submittedTotal,
+            String regNo,
+            Integer totalPollsMade,
+            Integer submittedTotal,
+            Integer attemptCount,
+            Boolean isCorrect,
+            Boolean isIdempotent,
             Integer expectedTotal,
             String message
     ) {

@@ -76,7 +76,7 @@ class QuizRunFlowIntegrationTest {
                 .willReturn(aResponse()
                         .withHeader("Content-Type", "application/json")
                         .withBody("""
-                                {"isCorrect":true,"isIdempotent":true,"submittedTotal":60,"expectedTotal":60,"message":"Correct!"}
+                                {"regNo":"2024CS101","totalPollsMade":10,"submittedTotal":60,"attemptCount":1}
                                 """)));
     }
 

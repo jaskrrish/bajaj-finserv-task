@@ -11,8 +11,6 @@ import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.time.Clock;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 
 @Configuration
 @EnableConfigurationProperties(AppProperties.class)
@@ -43,11 +41,6 @@ public class AppConfig {
     @Bean
     DelayStrategy delayStrategy() {
         return new ThreadSleepDelayStrategy();
-    }
-
-    @Bean(name = "quizRunExecutor")
-    Executor quizRunExecutor() {
-        return Executors.newVirtualThreadPerTaskExecutor();
     }
 
     @Bean

@@ -3,21 +3,18 @@ package com.bajaj.quiz.service;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
-import java.util.concurrent.Executor;
 
 @Component
 public class QuizRunAsyncProcessor {
 
     private final QuizRunService quizRunService;
-    private final Executor quizRunExecutor;
 
-    public QuizRunAsyncProcessor(QuizRunService quizRunService, Executor quizRunExecutor) {
+    public QuizRunAsyncProcessor(QuizRunService quizRunService) {
         this.quizRunService = quizRunService;
-        this.quizRunExecutor = quizRunExecutor;
     }
 
     public void orchestrate(UUID runId) {
-        quizRunExecutor.execute(() -> {
+        Thread.ofVirtual().name("quiz-run-" + runId).start(() -> {
             try {
                 quizRunService.executePolling(runId);
             } catch (Exception exception) {

@@ -5,6 +5,8 @@ import com.bajaj.quiz.client.ValidatorModels;
 import com.bajaj.quiz.domain.RunStatus;
 import com.bajaj.quiz.dto.ApiDtos;
 import com.bajaj.quiz.entity.QuizRun;
+import com.bajaj.quiz.repository.LeaderboardEntryRepository;
+import com.bajaj.quiz.repository.PollMessageRepository;
 import com.bajaj.quiz.repository.QuizRunRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +20,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -36,6 +40,12 @@ class QuizRunServiceTest {
 
     @Autowired
     private QuizRunRepository quizRunRepository;
+
+    @Autowired
+    private PollMessageRepository pollMessageRepository;
+
+    @Autowired
+    private LeaderboardEntryRepository leaderboardEntryRepository;
 
     @Autowired
     private LeaderboardCalculator leaderboardCalculator;
@@ -88,9 +98,49 @@ class QuizRunServiceTest {
                 )
         );
 
-        quizRunService.submitOnce(persisted, totals);
+        quizRunService.submitOnce(persisted.getId(), totals);
 
         assertThat(validatorGateway.submitCalls).isEqualTo(1);
+    }
+
+    @Test
+    void preservesLeaderboardStateWhenSubmitFails() {
+        QuizRun run = quizRunRepository.save(QuizRun.running("2024CS101"));
+        validatorGateway.failSubmit = true;
+
+        Exception failure = null;
+        try {
+            quizRunService.executePolling(run.getId());
+        } catch (Exception exception) {
+            failure = exception;
+            quizRunService.markFailed(run.getId(), exception);
+        }
+
+        assertThat(failure).isNotNull();
+
+        QuizRun persisted = quizRunRepository.findById(run.getId()).orElseThrow();
+        assertThat(persisted.getStatus()).isEqualTo(RunStatus.FAILED);
+        assertThat(persisted.getPollsCompleted()).isEqualTo(10);
+        assertThat(persisted.getTotalScore()).isEqualTo(60);
+        assertThat(leaderboardEntryRepository.findByRunIdOrderByRankOrderAsc(run.getId())).hasSize(2);
+    }
+
+    @Test
+    void commitsPollProgressBeforeWholeSequenceCompletes() throws InterruptedException {
+        QuizRun run = quizRunRepository.save(QuizRun.running("2024CS101"));
+        delayStrategy.blockOnNextSleep();
+
+        Thread worker = Thread.ofVirtual().start(() -> quizRunService.executePolling(run.getId()));
+
+        assertThat(delayStrategy.awaitBlockedSleep()).isTrue();
+        assertThat(quizRunRepository.findById(run.getId()).orElseThrow().getPollsCompleted()).isEqualTo(1);
+        assertThat(pollMessageRepository.findByRunIdOrderByPollIndexAsc(run.getId())).hasSize(1);
+
+        delayStrategy.releaseBlockedSleep();
+        worker.join(5_000);
+
+        assertThat(worker.isAlive()).isFalse();
+        assertThat(quizRunRepository.findById(run.getId()).orElseThrow().getPollsCompleted()).isEqualTo(10);
     }
 
     @TestConfiguration
@@ -118,6 +168,7 @@ class QuizRunServiceTest {
     static class StubValidatorGateway implements ValidatorGateway {
         final List<Integer> fetchPolls = new ArrayList<>();
         int submitCalls;
+        boolean failSubmit;
 
         @Override
         public ValidatorModels.QuizMessagesResponse fetchQuizMessages(String regNo, int pollIndex) {
@@ -137,25 +188,76 @@ class QuizRunServiceTest {
         @Override
         public ValidatorModels.QuizSubmitResponse submitLeaderboard(ValidatorModels.QuizSubmitRequest request) {
             submitCalls++;
-            return new ValidatorModels.QuizSubmitResponse(true, true, 60, 60, "Correct!");
+            if (failSubmit) {
+                throw new IllegalStateException("submit failed");
+            }
+            return new ValidatorModels.QuizSubmitResponse(
+                    request.regNo(),
+                    10,
+                    60,
+                    submitCalls,
+                    true,
+                    submitCalls > 1,
+                    60,
+                    "Correct!"
+            );
         }
 
         void reset() {
             fetchPolls.clear();
             submitCalls = 0;
+            failSubmit = false;
         }
     }
 
     static class RecordingDelayStrategy implements DelayStrategy {
         final List<Duration> sleepCalls = new ArrayList<>();
+        private volatile boolean shouldBlockNextSleep;
+        private volatile CountDownLatch blockedSleepEntered;
+        private volatile CountDownLatch releaseBlockedSleep;
 
         @Override
         public void sleep(Duration duration) {
             sleepCalls.add(duration);
+            CountDownLatch entered = blockedSleepEntered;
+            CountDownLatch release = releaseBlockedSleep;
+            if (shouldBlockNextSleep && entered != null && release != null) {
+                shouldBlockNextSleep = false;
+                entered.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Timed out waiting to release blocked sleep");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while waiting to release blocked sleep", exception);
+                }
+            }
         }
 
         void reset() {
             sleepCalls.clear();
+            shouldBlockNextSleep = false;
+            blockedSleepEntered = null;
+            releaseBlockedSleep = null;
+        }
+
+        void blockOnNextSleep() {
+            shouldBlockNextSleep = true;
+            blockedSleepEntered = new CountDownLatch(1);
+            releaseBlockedSleep = new CountDownLatch(1);
+        }
+
+        boolean awaitBlockedSleep() throws InterruptedException {
+            CountDownLatch latch = blockedSleepEntered;
+            return latch != null && latch.await(2, TimeUnit.SECONDS);
+        }
+
+        void releaseBlockedSleep() {
+            CountDownLatch latch = releaseBlockedSleep;
+            if (latch != null) {
+                latch.countDown();
+            }
         }
     }
 
